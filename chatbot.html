@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VISIORES 1.0 - Research Assistant</title>
+    <link rel="stylesheet" href="chatbot.css">
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header Section -->
+    <header class="chatbot-header">
+        <img src="images/Visiores.png" alt="Visiores Logo" class="logo">
+        <h1>VISIORES 1.0</h1>
+        <p class="subtitle">AI Research Paper Assistant</p>
+    </header>
+
+    <!-- Chat Container -->
+    <section class="chat-container">
+        <div class="chat-area" id="chatArea">
+            <div class="welcome-message">
+                <p>Welcome to VISIORES Research Assistant! You can search for papers by:</p>
+                <ul>
+                    <li>Model names (e.g., "BERT", "Transformer")</li>
+                    <li>Author names (e.g., "author:Smith")</li>
+                    <li>Paper IDs (e.g., "id:2101.00001")</li>
+                    <li>Abstract keywords</li>
+                </ul>
+                <p>Try searching for something like "transformer models in NLP" or "author:LeCun"</p>
+            </div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Search for papers..." autocomplete="off">
+            <button class="send-btn" id="sendBtn">
+                <i class="bx bx-send"></i>
+            </button>
+        </div>
+    </section>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const chatArea = document.getElementById('chatArea');
+            const userInput = document.getElementById('userInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const API_URL = 'http://localhost:5000/search';
+            
+            // Add message to chat area
+            function addMessage(content, isUser = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = isUser ? 'user-message' : 'bot-message';
+                messageDiv.innerHTML = content;
+                chatArea.appendChild(messageDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+            
+            // Format paper result for display
+            function formatPaperResult(paper) {
+                // Format authors list
+                let authors = paper.authors;
+                if (authors.startsWith('[') && authors.endsWith(']')) {
+                    try {
+                        const authorsList = JSON.parse(authors.replace(/'/g, '"'));
+                        authors = authorsList.join(', ');
+                    } catch (e) {
+                        // If parsing fails, use original string
+                    }
+                }
+                
+                // Shorten very long abstracts
+                let abstract = paper.abstract;
+                if (abstract.length > 500) {
+                    abstract = abstract.substring(0, 500) + '...';
+                }
+                
+                return `
+                    <div class="paper-result">
+                        <h3>${paper.title}</h3>
+                        <p class="paper-meta">
+                            <span class="paper-id">ID: ${paper.id}</span> | 
+                            <span class="categories">${paper.categories}</span>
+                        </p>
+                        <p class="authors">${authors}</p>
+                        <div class="abstract">
+                            <p>${abstract}</p>
+                        </div>
+                        ${paper.score ? `<p class="score">Relevance: ${(paper.score * 100).toFixed(1)}%</p>` : ''}
+                    </div>
+                `;
+            }
+            
+            // Determine search type based on input
+            function determineSearchType(query) {
+                if (query.toLowerCase().startsWith('author:')) {
+                    return { type: 'author', query: query.substring(7).trim() };
+                } else if (query.toLowerCase().startsWith('id:')) {
+                    return { type: 'id', query: query.substring(3).trim() };
+                }
+                return { type: 'semantic', query: query };
+            }
+            
+            // Search papers via API
+            async function searchPapers(query) {
+                const { type, query: searchQuery } = determineSearchType(query);
+                
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ 
+                            query: searchQuery, 
+                            type: type,
+                            top_k: 5 
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`API request failed: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    return data.results;
+                } catch (error) {
+                    console.error('Search error:', error);
+                    return null;
+                }
+            }
+            
+            // Handle send button click
+            sendBtn.addEventListener('click', async function() {
+                const query = userInput.value.trim();
+                if (!query) return;
+                
+                // Add user message
+                addMessage(`<p>${query}</p>`, true);
+                userInput.value = '';
+                
+                // Show loading indicator
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'bot-message loading';
+                loadingDiv.innerHTML = '<p>Searching for relevant papers...</p>';
+                chatArea.appendChild(loadingDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+                
+                // Get results from API
+                const results = await searchPapers(query);
+                
+                // Remove loading indicator
+                chatArea.removeChild(loadingDiv);
+                
+                if (!results || results.length === 0) {
+                    addMessage('<p>No relevant papers found. Try a different query.</p>');
+                    return;
+                }
+                
+                // Add results header
+                const searchType = determineSearchType(query).type;
+                let resultsHeader = '';
+                if (searchType === 'author') {
+                    resultsHeader = `<p>Papers by author "${query.substring(7)}":</p>`;
+                } else if (searchType === 'id') {
+                    resultsHeader = `<p>Paper with ID "${query.substring(3)}":</p>`;
+                } else {
+                    resultsHeader = `<p>Top ${results.length} relevant papers for "${query}":</p>`;
+                }
+                addMessage(resultsHeader);
+                
+                // Add each paper result
+                results.forEach(paper => {
+                    addMessage(formatPaperResult(paper));
+                });
+            });
+            
+            // Allow Enter key to send message
+            userInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendBtn.click();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
